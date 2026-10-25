@@ -14,7 +14,7 @@ This plugin adds an option for Continuous Folder Shuffle to Rhythmbox.
 - The plugin preserves the current library view and filters while playing.
 
 # Shuffling Methodology
-Folder shuffling is intended to be separate and distinct from my related Album Shuffle plugin. While the album shuffle plugin will always start at the beginning of the album and play through the entire album, the folder shuffle will only play one portion of the album if the album is divided into different folders. This can be helpful, for example, with Classical music albums that contain multiple works on the same disc. If each individual work, with all of its tracks, is placed into a separate subfolder, folder shuffle will shuffle by works instead of by albums.
+Folder shuffling is intended to be separate and distinct from my related [Album Shuffle plugin](https://github.com/username227/Rhythmbox-Album-Shuffle). While the album shuffle plugin will always start at the beginning of the album and play through the entire album, the folder shuffle will only play one portion of the album if the album is divided into different folders. This can be helpful, for example, with Classical music albums that contain multiple works on the same disc. If each individual work, with all of its tracks, is placed into a separate subfolder, folder shuffle will shuffle by works instead of by albums.
 
 Conversely, if multiple albums are placed in the same folder, those albums will always be played together.
 
