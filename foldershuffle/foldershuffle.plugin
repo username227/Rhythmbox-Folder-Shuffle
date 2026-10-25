@@ -1,0 +1,8 @@
+[Plugin]
+Loader=python3
+Module=foldershuffle
+IAge=2
+Name=Continuous Folder Shuffle
+Description=Shuffle physical music folders while playing tracks in disc and track order.
+Authors=Community plugin draft
+Copyright=Copyright 2026
