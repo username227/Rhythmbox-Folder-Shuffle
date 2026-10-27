@@ -157,7 +157,12 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
                 if img and img.get_pixel_size() > 0:
                     size = img.get_pixel_size()
             btn = Gtk.Button()
-            btn.set_relief(Gtk.ReliefStyle.NONE)
+            if isinstance(shuffle, Gtk.Button):
+                btn.set_relief(shuffle.get_relief())
+            # GTK does not automatically recognize DrawingArea as an icon-only button.
+            btn.get_style_context().add_class('image-button')
+            if isinstance(shuffle, Gtk.Button) and shuffle.get_style_context().has_class('raised'):
+                btn.get_style_context().add_class('raised')
             btn.set_tooltip_text('Shuffle Folders — start a fresh random folder sequence')
             area = Gtk.DrawingArea()
             area.set_size_request(size, size)
