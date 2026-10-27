@@ -4,6 +4,8 @@ import random
 from collections import defaultdict, deque
 from urllib.parse import urlparse, unquote
 
+import cairo
+
 from gi.repository import GObject, Gio, GLib, Gtk, Gdk, GdkPixbuf, Peas, RB
 
 LOG = logging.getLogger('rhythmbox-folder-shuffle')
@@ -100,29 +102,33 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
             return False
         theme = Gtk.IconTheme.get_default()
         pixbuf = None
-        for icon in ('media-playlist-shuffle-symbolic', 'media-playlist-shuffle'):
-            if theme.has_icon(icon):
-                try:
-                    pixbuf = theme.load_icon(icon, size, Gtk.IconLookupFlags.FORCE_SIZE)
-                    break
-                except GLib.Error:
-                    pass
+        for name in ('media-playlist-shuffle-symbolic', 'media-playlist-shuffle'):
+            if not theme.has_icon(name):
+                continue
+            try:
+                info = theme.lookup_icon(name, size, Gtk.IconLookupFlags.FORCE_SIZE)
+                if info is None:
+                    continue
+                pixbuf, _symbolic = info.load_symbolic_for_context(area.get_style_context())
+                break
+            except GLib.Error:
+                continue
+        cr.push_group()
         if pixbuf:
             x = (area.get_allocated_width() - pixbuf.get_width()) / 2
             y = (area.get_allocated_height() - pixbuf.get_height()) / 2
             Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y)
             cr.paint()
-        fg = area.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+        fg = area.get_style_context().get_color(area.get_style_context().get_state())
         dark = (fg.red, fg.green, fg.blue)
-        lum = .2126*fg.red + .7152*fg.green + .0722*fg.blue
-        light = (.96, .96, .96) if lum < .5 else (.08, .08, .08)
-        # Cover the lower-right shuffle arrow completely across icon themes,
-        # then draw the folder with a lower top edge while retaining the bottom baseline.
+        # CLEAR affects only our isolated icon group, never Rhythmbox's toolbar.
+        # Cut out the arrowhead before drawing the folder silhouette.
         x, y = size*.45, size*.46
         w, h = size*.51, size*.54
-        cr.set_source_rgb(*light)
+        cr.set_operator(cairo.OPERATOR_CLEAR)
         cr.rectangle(x-size*.035, y-size*.035, w+size*.065, h+size*.035)
         cr.fill()
+        cr.set_operator(cairo.OPERATOR_OVER)
         cr.set_source_rgb(*dark)
         cr.move_to(x, y+size*.06)
         cr.line_to(x, y)
@@ -133,9 +139,13 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
         cr.line_to(x, y+h)
         cr.close_path()
         cr.fill()
-        cr.set_source_rgb(*light)
+        # The folder inset is transparent, not white or a guessed theme color.
+        cr.set_operator(cairo.OPERATOR_CLEAR)
         cr.rectangle(x+size*.055, y+size*.145, w-size*.10, h-size*.215)
         cr.fill()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        cr.pop_group_to_source()
+        cr.paint()
         return False
 
     def _install_button(self):
@@ -168,6 +178,8 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
             area.set_size_request(size, size)
             area.connect('draw', self._draw_icon)
             area.connect('style-updated', lambda w: w.queue_draw())
+            Gtk.IconTheme.get_default().connect('changed', lambda _theme: area.queue_draw())
+            area.connect('state-flags-changed', lambda w, old_flags: w.queue_draw())
             btn.add(area)
             btn.connect('clicked', self.on_start)
             self.button = btn
