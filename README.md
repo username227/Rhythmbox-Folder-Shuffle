@@ -19,9 +19,22 @@ Folder shuffling is intended to be separate and distinct from my related [Album 
 Conversely, if multiple albums are placed in the same folder, those albums will always be played together.
 
 # Installation
-Install the foldershuffle folder into either `/usr/lib/rhythmbox/plugins` or `~/.local/share/rhythmbox/plugins`. <p>
-For the Flatpak version, install it into `~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins`. <p>
-In Rhythmbox, go to Preferences > Plugins and click "Continuous Folder Shuffle" to activate.
+For a **user-level installation**, copy the plugin folder into:
+
+`~/.local/share/rhythmbox/plugins/`
+
+For a **system-wide installation**, the location depends on your distribution:
+
+- **Arch Linux:** `/usr/lib/rhythmbox/plugins/`
+- **Debian/Ubuntu/Mint (x86_64):** `/usr/lib/x86_64-linux-gnu/rhythmbox/plugins/`
+- **Debian/Ubuntu/Mint (ARM64):** `/usr/lib/aarch64-linux-gnu/rhythmbox/plugins/`
+
+For **Flatpak**, use:
+
+`~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins/`
+
+Restart Rhythmbox, open **Preferences → Plugins**, and enable the plugin.
+
 
 # Full Disclosure
   I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on  Arch Linux with Rhythmbox 3.5.1. I have not tested the plugin on other distributions. Reviews and improvements to the code base, as well as additional feature requests, are welcome.
