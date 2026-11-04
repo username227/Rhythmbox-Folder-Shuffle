@@ -10,7 +10,11 @@ from gi.repository import GObject, Gio, GLib, Gtk, Gdk, GdkPixbuf, Peas, RB
 
 LOG = logging.getLogger('rhythmbox-folder-shuffle')
 PLAYLIST_NAME = 'Continuous Folder Shuffle'
-BATCH_FOLDERS = 12
+# INITIAL_GROUPS is a startup prefill, NOT an eligibility or playlist limit.
+# Remaining groups are inserted during GTK idle cycles until EVERY track is present.
+INITIAL_GROUPS = 12
+FULL_GROUPS_PER_IDLE = 16
+FULL_TRACKS_PER_IDLE = 250
 
 
 def group_folders(entries):
@@ -46,6 +50,8 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
         self.scheduled_count = self.completed_count = 0
         self.active = self.replenishing = False
         self.pending_follow = None
+        self._full_playlist_idle = None
+        self._full_playlist_expected_tracks = 0
 
     def do_activate(self):
         self.app = Gio.Application.get_default()
@@ -226,6 +232,67 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
         self.playlist = manager.new_playlist(PLAYLIST_NAME, False)
         return self.playlist
 
+    def _cancel_full_playlist(self):
+        if self._full_playlist_idle is not None:
+            GLib.source_remove(self._full_playlist_idle)
+            self._full_playlist_idle = None
+
+    def _schedule_full_playlist(self):
+        if self._full_playlist_idle is None and self.deck and self.playlist is not None:
+            self._full_playlist_idle = GLib.idle_add(self._fill_playlist_step)
+
+    def _fill_playlist_step(self):
+        # Populate the complete shuffled cycle without a long blocking GTK call.
+        # The limited batch is a time slice; there is NO folder or track limit.
+        if self.playlist is None or not self.folders:
+            self._full_playlist_idle = None
+            return GLib.SOURCE_REMOVE
+        try:
+            groups_added = tracks_added = 0
+            while (self.deck and groups_added < FULL_GROUPS_PER_IDLE and
+                   (tracks_added < FULL_TRACKS_PER_IDLE or groups_added == 0)):
+                key = self.deck[0]
+                tracks_added += len(self.folders[key])
+                self._append_folder()
+                groups_added += 1
+            if getattr(self, '_ss_generation', None) is not None:
+                _ss_progress(self, 'folder')
+            if self.deck:
+                return GLib.SOURCE_CONTINUE
+            self._full_playlist_idle = None
+            actual = sum(1 for _row in self.playlist.get_query_model())
+            expected = self._full_playlist_expected_tracks or sum(len(v) for v in self.folders.values())
+            if actual != expected:
+                LOG.error('Folder Shuffle INCOMPLETE: playlist contains %d of %d eligible tracks',
+                          actual, expected)
+                self._report_incomplete(actual, expected)
+            else:
+                LOG.warning('Folder Shuffle: COMPLETE playlist: %d folders, %d/%d tracks',
+                            len(self.folders), actual, expected)
+            return GLib.SOURCE_REMOVE
+        except Exception:
+            self._full_playlist_idle = None
+            LOG.exception('Folder Shuffle: failed to finish generated playlist')
+            self._report_incomplete(-1, self._full_playlist_expected_tracks)
+            return GLib.SOURCE_REMOVE
+
+    def _report_incomplete(self, actual, expected):
+        # Do not leave a truncated playlist pretending to be the full selection.
+        try:
+            detail = ('Only %d of %d eligible tracks were added.' % (actual, expected)
+                      if actual >= 0 else 'An error interrupted playlist generation.')
+            dialog = Gtk.MessageDialog(
+                transient_for=self.object.props.window,
+                flags=Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text='Folder Shuffle playlist is incomplete')
+            dialog.format_secondary_text(detail + ' Please check the Rhythmbox log.')
+            dialog.connect('response', lambda dlg, _response: dlg.destroy())
+            dialog.show()
+        except Exception:
+            LOG.exception('Folder Shuffle: could not show incomplete-playlist warning')
+
     def _append_folder(self):
         if not self.deck:
             keys = list(self.folders)
@@ -240,6 +307,7 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
         return tracks[0]
 
     def on_start(self, *_args):
+        self._cancel_full_playlist()
         try:
             source = self._source()
             if source is None:
@@ -250,7 +318,8 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
             if model is None:
                 LOG.warning('Folder Shuffle: no displayed song list')
                 return
-            grouped = group_folders(row[0] for row in model)
+            displayed = [row[0] for row in model]
+            grouped = group_folders(displayed)
             if not grouped:
                 LOG.warning('Folder Shuffle: no local files in current filtered view')
                 return
@@ -262,6 +331,7 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
                 for entry in [r[0] for r in old]:
                     playlist.remove_entry(entry)
             self.folders = grouped
+            self._full_playlist_expected_tracks = sum(len(v) for v in grouped.values())
             self.deck = deque(grouped)
             shuffled = list(self.deck)
             random.SystemRandom().shuffle(shuffled)
@@ -270,14 +340,17 @@ class ContinuousFolderShuffle(GObject.Object, Peas.Activatable):
             self.scheduled_count = self.completed_count = 0
             self.last_source = source
             first = None
-            for _ in range(min(BATCH_FOLDERS, len(self.deck))):
+            for _ in range(min(INITIAL_GROUPS, len(self.deck))):
                 entry = self._append_folder()
                 if first is None:
                     first = entry
             self.active = True
             self.player.play_entry(first, playlist)
             GLib.idle_add(self._restore_view, source, first)
-            LOG.warning('Folder Shuffle: %d folders started', len(grouped))
+            self._schedule_full_playlist()
+            LOG.warning('Folder Shuffle: %d folders, %d eligible tracks from %d displayed '
+                        '(%d excluded)', len(grouped), self._full_playlist_expected_tracks,
+                        len(displayed), len(displayed) - self._full_playlist_expected_tracks)
         except Exception:
             self.active = False
             LOG.exception('Could not start Folder Shuffle')
@@ -526,6 +599,9 @@ def _ss_restore(plugin, mode):
         plugin._ss_restored = True
         plugin._ss_restore_timer = None
         _ss_ready(plugin, mode)
+        # Finish any unbuilt portion of an earlier rolling or interrupted queue.
+        plugin._full_playlist_expected_tracks = sum(len(v) for v in groups.values())
+        plugin._schedule_full_playlist()
         LOG.warning('%s Shuffle: recovered %d groups, %d pending groups, %d group ends',
                     mode.title(), len(groups), len(plugin.deck), len(progress.get('ends', [])))
         entry = plugin.player.get_playing_entry()
@@ -542,36 +618,58 @@ def _ss_restore(plugin, mode):
 
 
 
-# Restore Music-window highlighting independently of shuffle-session recovery.
-# A restored playlist already receives Rhythmbox's playing-row indicator, but
-# the Music view must be explicitly selected/scrolled when it is visible.
-# This has no effect on audio, ordering, playlist membership, or state files.
+# Follow the visible song row when playback originates from OUR generated
+# shuffle playlist, even if the shuffle was resumed manually after playing
+# something else (which leaves the scheduling engine's active flag False).
+# This must not change playback, selected sources, filters, or playlist content.
 def _ss_follow_music_view(plugin, mode):
     plugin._ss_music_follow_id = None
     try:
+        expected_name = ('Continuous Album Shuffle' if mode == 'album'
+                         else 'Continuous Folder Shuffle')
         playing_source = plugin.player.get_playing_source()
-        expected_name = 'Continuous Album Shuffle' if mode == 'album' else 'Continuous Folder Shuffle'
         if playing_source is None or playing_source.props.name != expected_name:
             return GLib.SOURCE_REMOVE
+
         music = plugin.object.props.library_source
-        if music is None or plugin.object.props.selected_page != music:
+        page = plugin.object.props.selected_page
+        # Only the Music page and the exact active shuffle playlist qualify.
+        # Do not interfere with any other playlist, or with manual browsing.
+        if music is None or (page != music and page != playing_source):
             return GLib.SOURCE_REMOVE
         entry = plugin.player.get_playing_entry()
         if entry is None:
             return GLib.SOURCE_REMOVE
-        view = music.get_entry_view()
-        if view is not None and view.get_entry_contained(entry):
+        view = page.get_entry_view()
+        if view is None or not view.get_entry_contained(entry):
+            return GLib.SOURCE_REMOVE  # The user's current filter hides it.
+
+        selected = view.get_selected_entries() or []
+        if not (len(selected) == 1 and selected[0] == entry):
             view.select_none()
             view.select_entry(entry)
-            view.scroll_to_entry(entry)
+        view.scroll_to_entry(entry)
     except Exception:
-        LOG.exception('%s Shuffle: could not highlight playing song in Music', mode.title())
+        LOG.exception('%s Shuffle: could not follow playing song in current view',
+                      mode.title())
     return GLib.SOURCE_REMOVE
 
 
-def _ss_schedule_music_follow(plugin, mode):
-    if getattr(plugin, '_ss_music_follow_id', None) is None:
-        plugin._ss_music_follow_id = GLib.idle_add(_ss_follow_music_view, plugin, mode)
+def _ss_schedule_music_follow(plugin, mode, page_changed=False):
+    # Switching notebook pages can precede GTK's final layout.  Let the new
+    # page settle before scrolling; ordinary song changes stay on the idle path.
+    existing = getattr(plugin, '_ss_music_follow_id', None)
+    if existing is not None:
+        if not page_changed:
+            return
+        GLib.source_remove(existing)
+        plugin._ss_music_follow_id = None
+    if page_changed:
+        plugin._ss_music_follow_id = GLib.timeout_add(
+            75, _ss_follow_music_view, plugin, mode)
+    else:
+        plugin._ss_music_follow_id = GLib.idle_add(
+            _ss_follow_music_view, plugin, mode)
 
 def _ss_wrap(cls, mode):
     original_activate = cls.do_activate
@@ -591,13 +689,14 @@ def _ss_wrap(cls, mode):
         self._ss_music_follow_id = None
         self._ss_music_page_handler = self.object.connect(
             'notify::selected-page',
-            lambda *_args: _ss_schedule_music_follow(self, mode))
+            lambda *_args: _ss_schedule_music_follow(self, mode, page_changed=True))
         self._ss_music_source_handler = self.player.connect(
             'playing-source-changed',
             lambda *_args: _ss_schedule_music_follow(self, mode))
         _ss_schedule_music_follow(self, mode)
 
     def deactivate(self):
+        self._cancel_full_playlist()
         if getattr(self, '_ss_music_follow_id', None) is not None:
             GLib.source_remove(self._ss_music_follow_id)
             self._ss_music_follow_id = None
