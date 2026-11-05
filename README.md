@@ -43,6 +43,14 @@ For **Flatpak**, use:
 
 Restart Rhythmbox, open **Preferences → Plugins**, and enable the plugin.
 
+## Full Plugins Collection
+Check out my additional Rhythmbox plugins:
+- [Album Shuffle](https://github.com/username227/Rhythmbox-Album-Shuffle/edit/main/README.md) - Shuffle by Album
+- [Album Artist Filter](https://github.com/username227/Rhythmbox-AlbumArtist-Filter) - filter songs by Album Artist instead of Artist
+- [Now Playing Sidebar](https://github.com/username227/Rhythmbox-Now-Playing-Sidebar) - Adds a visible Now Playing box to the left sidebar
+- [Session Restore](https://github.com/username227/Rhythmbox-Session-Restore) - Remembers the last song and playlist currently playing when Rhythmbox restarts
+
+
 ## Full Disclosure
 
 I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on Arch Linux with Rhythmbox 3.5.1. I have not tested the plugin on other distributions. Reviews and improvements to the codebase, as well as additional feature requests, are welcome.
